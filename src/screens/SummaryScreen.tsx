@@ -26,9 +26,7 @@ export function SummaryScreen() {
   const challenge = useAppStore((s) => s.challenge);
   const workouts = useAppStore((s) => s.workouts);
   const busy = useAppStore((s) => s.busy);
-  const mode = useAppStore((s) => s.mode);
-  const refreshDemo = useAppStore((s) => s.refreshDemo);
-  const syncHealthNow = useAppStore((s) => s.syncHealthNow);
+  const syncNow = useAppStore((s) => s.syncNow);
   const today = todayKey();
 
   const ordered = [me, ...members.filter((m) => m.id !== me.id)];
@@ -48,8 +46,7 @@ export function SummaryScreen() {
   };
 
   const onRefresh = () => {
-    if (mode === 'demo') refreshDemo();
-    else syncHealthNow().catch(() => {});
+    syncNow().catch(() => {});
   };
 
   return (
@@ -151,7 +148,7 @@ export function SummaryScreen() {
         </Card>
         {members.length < 2 ? (
           <Txt variant="footnote" color={colors.textMuted}>
-            Invite your brothers from Settings → Group to see their data here.
+            Invite your brothers from Settings → Account to see their data here.
           </Txt>
         ) : null}
       </Section>

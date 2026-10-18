@@ -15,7 +15,7 @@ export type WorkoutType =
   | 'sport'
   | 'other';
 
-export type DataSource = 'demo' | 'healthconnect' | 'healthkit' | 'manual';
+export type DataSource = 'demo' | 'healthconnect' | 'healthkit' | 'google' | 'manual';
 
 export interface Goals {
   steps: number;

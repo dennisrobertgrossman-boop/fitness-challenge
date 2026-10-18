@@ -15,6 +15,14 @@ import type { RootProps } from '../navigation/types';
 import { useAppStore } from '../store/useAppStore';
 import { colors, metricColors, spacing } from '../theme';
 
+const SOURCE_LABEL = {
+  manual: 'Logged manually',
+  demo: 'Demo',
+  healthkit: 'Apple Health',
+  healthconnect: 'Health Connect',
+  google: 'Google Health (Fitbit)',
+} as const;
+
 export function WorkoutDetailScreen({ route }: RootProps<'Workout'>) {
   const nav = useNavigation();
   const workout = useAppStore((s) => s.workouts.find((w) => w.id === route.params.workoutId));
@@ -55,7 +63,7 @@ export function WorkoutDetailScreen({ route }: RootProps<'Workout'>) {
             {member?.name} · {formatDay(isoToDayKey(w.start), 'long')}
           </Txt>
           <Txt variant="footnote" color={colors.textMuted} tabular>
-            {formatTime(w.start)}–{formatTime(end)} · {w.source === 'manual' ? 'Logged manually' : w.source === 'demo' ? 'Demo' : w.source === 'healthkit' ? 'Apple Health' : 'Health Connect'}
+            {formatTime(w.start)}–{formatTime(end)} · {SOURCE_LABEL[w.source]}
           </Txt>
         </View>
       </View>
@@ -65,7 +73,7 @@ export function WorkoutDetailScreen({ route }: RootProps<'Workout'>) {
           <StatTile label="Workout Time" value={formatDurationClock(w.durationMin)} color={metricColors.workouts} />
           {w.distanceKm ? <StatTile label="Distance" value={formatNumber(w.distanceKm, 2)} unit="km" color={metricColors.distanceKm} /> : null}
           {w.cardioLoad != null ? (
-            <StatTile label="Cardio Load" value={String(w.cardioLoad)} unit="pts" color={metricColors.cardioLoad} sub="estimated from heart rate" />
+            <StatTile label="Cardio Load" value={String(w.cardioLoad)} unit="pts" color={metricColors.cardioLoad} sub={w.source === 'google' ? 'estimated from heart-rate zones' : 'estimated from heart rate'} />
           ) : null}
           {w.activeCalories ? <StatTile label="Active Calories" value={formatNumber(w.activeCalories)} unit="kcal" color={metricColors.activeCalories} /> : null}
           {w.avgHr ? <StatTile label="Avg. Heart Rate" value={String(w.avgHr)} unit="bpm" color={metricColors.steps} /> : null}

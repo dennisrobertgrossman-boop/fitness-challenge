@@ -175,3 +175,18 @@ $$;
 
 grant execute on function public.create_group(text, text, text) to authenticated;
 grant execute on function public.join_group(text, text, text) to authenticated;
+
+-- ---------- Google Health (Fitbit) connection ----------
+-- Refresh tokens for the google-health Edge Function. Row level security is on and
+-- there are no policies, so only the service role (used by the function) can read them.
+
+create table if not exists public.google_health_tokens (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  refresh_token text not null,
+  scopes text,
+  updated_at timestamptz not null default now(),
+  last_sync timestamptz,
+  last_error text
+);
+alter table public.google_health_tokens enable row level security;
+revoke all on public.google_health_tokens from anon, authenticated;

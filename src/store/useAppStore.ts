@@ -6,6 +6,7 @@ import { addDays, todayKey } from '../lib/dates';
 import type { HrProfile } from '../lib/heartRate';
 import { DataView, indexWorkouts } from '../lib/stats';
 import * as cloud from '../services/cloud/api';
+import * as auth from '../services/cloud/auth';
 import { cloudConfigured } from '../services/cloud/client';
 import { healthProvider, syncHealth } from '../services/health';
 import { safeStorage } from '../services/storage';
@@ -13,6 +14,12 @@ import { memberPalette } from '../theme';
 import type { Challenge, DailyMap, DailyMetric, DayKey, Member, Workout } from '../types';
 
 export type Mode = 'demo' | 'live';
+
+export type Entry = 'welcome' | 'app';
+export type MySource = 'google' | 'device';
+
+export const SIGN_IN_UNAVAILABLE =
+  'Sign-in is not switched on in this build. It works once the cloud backend is set up (README → Cloud sync).';
 
 export interface CloudLink {
   userId: string;
@@ -23,7 +30,14 @@ export interface CloudLink {
 }
 
 interface State {
+  /** 'welcome' shows the sign-in screen; 'app' shows the tabs. */
+  entry: Entry;
   mode: Mode;
+  /** Where your own data comes from in live mode. */
+  dataSource: MySource;
+  /** True after first sign-in until the group and data source are chosen. */
+  setupPending: boolean;
+  googleHealth?: { linked: boolean; lastSync?: string; lastError?: string };
   meId: string;
   members: Member[];
   challenge: Challenge;
@@ -47,6 +61,18 @@ interface Actions {
   setChallenge(patch: Partial<Challenge>): void;
   setProfile(patch: Partial<HrProfile>): void;
   setCardioOverride(memberId: string, day: DayKey, value: number | null): void;
+  setManualSteps(memberId: string, day: DayKey, steps: number): void;
+  startDemo(): void;
+  signInWithGoogle(): Promise<'ready' | 'needs-group' | 'cancelled'>;
+  completeSignIn(user: auth.SignedInUser): Promise<'ready' | 'needs-group'>;
+  finishWebRedirect(): Promise<void>;
+  setGroup(group: cloud.Group): Promise<void>;
+  setDataSource(source: MySource): void;
+  connectGoogleHealth(): Promise<string>;
+  disconnectGoogleHealth(): Promise<void>;
+  syncNow(): Promise<string>;
+  signOut(): void;
+  finishSetup(): void;
   addWorkout(w: Workout): void;
   deleteWorkout(id: string): void;
   syncHealthNow(): Promise<string>;
@@ -59,7 +85,10 @@ interface Actions {
 const demo = generateDemoData();
 
 const initial: State = {
+  entry: 'welcome',
   mode: 'demo',
+  dataSource: 'device',
+  setupPending: false,
   meId: 'm1',
   members: DEFAULT_MEMBERS,
   challenge: defaultChallenge(),
@@ -261,6 +290,138 @@ export const useAppStore = create<State & Actions>()(
         });
       },
 
+      setManualSteps(memberId, day, steps) {
+        const existing = get().daily[memberId]?.[day];
+        const row: DailyMetric = {
+          ...(existing ?? {
+            memberId,
+            date: day,
+            cardioLoad: 0,
+            cardioLoadSource: 'estimated' as const,
+            activeMinutes: 0,
+            activeCalories: 0,
+            distanceKm: 0,
+          }),
+          steps: Math.round(steps),
+          source: 'manual',
+        };
+        set({ daily: { ...get().daily, [memberId]: { ...(get().daily[memberId] ?? {}), [day]: row } } });
+        if (get().cloud?.groupId && memberId === get().meId) cloud.pushMyData([row], []).catch(() => {});
+      },
+
+      startDemo() {
+        get().enterDemo();
+        set({ entry: 'app' });
+      },
+
+      async signInWithGoogle() {
+        if (!cloudConfigured) throw new Error(SIGN_IN_UNAVAILABLE);
+        const user = await auth.signInWithGoogle();
+        if (!user) return 'cancelled';
+        return get().completeSignIn(user);
+      },
+
+      async completeSignIn(user) {
+        if (get().mode !== 'live') get().goLive(user.name ?? 'Me');
+        if (get().cloud?.userId !== user.userId) get().linkCloud({ userId: user.userId, email: user.email });
+        const group = await cloud.myGroup();
+        set({ entry: 'app', setupPending: !group });
+        if (!group) return 'needs-group';
+        await get().setGroup(group);
+        return 'ready';
+      },
+
+      async finishWebRedirect() {
+        if (!cloudConfigured) return;
+        const res = await auth.completeWebSignIn().catch(() => null);
+        if (!res) return;
+        if (get().cloud?.userId !== res.user.userId) await get().completeSignIn(res.user);
+        if (res.healthRequested && res.user.providerRefreshToken && get().cloud?.groupId) {
+          await cloud.linkGoogleHealth(res.user.providerRefreshToken, todayKey());
+          set({ dataSource: 'google', googleHealth: { linked: true, lastSync: new Date().toISOString() } });
+          await get().syncCloudNow().catch(() => {});
+        }
+      },
+
+      async setGroup(group) {
+        set((st) => ({
+          cloud: st.cloud && { ...st.cloud, groupId: group.id, groupName: group.name, inviteCode: group.invite_code },
+        }));
+        await get().syncCloudNow().catch(() => {});
+        if (get().cloud?.groupId) {
+          const status = await cloud.googleHealthStatus().catch(() => null);
+          if (status?.linked) {
+            set({
+              dataSource: 'google',
+              googleHealth: { linked: true, lastSync: status.lastSync ?? undefined, lastError: status.lastError ?? undefined },
+            });
+          }
+        }
+      },
+
+      setDataSource(source) {
+        set({ dataSource: source });
+      },
+
+      async connectGoogleHealth() {
+        if (!cloudConfigured) throw new Error(SIGN_IN_UNAVAILABLE);
+        set({ busy: true, lastError: undefined });
+        try {
+          const user = await auth.signInWithGoogle({ health: true });
+          if (!user) return ''; // cancelled, or the web page is redirecting to Google
+          if (get().cloud?.userId !== user.userId) await get().completeSignIn(user);
+          if (!get().cloud?.groupId) throw new Error('Create or join a group first, then connect Google Health.');
+          if (!user.providerRefreshToken) throw new Error('Google did not grant ongoing access. Try again and allow all requested access.');
+          const r = await cloud.linkGoogleHealth(user.providerRefreshToken, todayKey());
+          set({ dataSource: 'google', googleHealth: { linked: true, lastSync: new Date().toISOString() } });
+          await get().syncCloudNow();
+          return `Imported ${r.days} days and ${r.workouts} workouts from Google Health.`;
+        } catch (e) {
+          set({ lastError: errorMessage(e) });
+          throw e;
+        } finally {
+          set({ busy: false });
+        }
+      },
+
+      async disconnectGoogleHealth() {
+        await cloud.unlinkGoogleHealth().catch(() => {});
+        set({ googleHealth: undefined, dataSource: 'device' });
+      },
+
+      async syncNow() {
+        const { mode, dataSource, cloud: link } = get();
+        if (mode === 'demo') {
+          get().refreshDemo();
+          return 'Demo data refreshed.';
+        }
+        if (dataSource === 'google' && link?.groupId) {
+          set({ busy: true, lastError: undefined });
+          try {
+            const r = await cloud.syncGoogleHealth(todayKey(), 14);
+            set({ googleHealth: { linked: true, lastSync: new Date().toISOString() } });
+            await get().syncCloudNow();
+            return `Updated ${r.days} days and ${r.workouts} workouts from Google Health.`;
+          } catch (e) {
+            set({ lastError: errorMessage(e), googleHealth: { ...get().googleHealth, linked: true, lastError: errorMessage(e) } });
+            throw e;
+          } finally {
+            set({ busy: false });
+          }
+        }
+        return get().syncHealthNow();
+      },
+
+      signOut() {
+        if (cloudConfigured) cloud.signOut().catch(() => {});
+        get().enterDemo();
+        set({ entry: 'welcome', dataSource: 'device', googleHealth: undefined, setupPending: false });
+      },
+
+      finishSetup() {
+        set({ setupPending: false });
+      },
+
       clearError() {
         set({ lastError: undefined });
       },
@@ -270,7 +431,11 @@ export const useAppStore = create<State & Actions>()(
       version: 1,
       storage: createJSONStorage(() => safeStorage),
       partialize: (s) => ({
+        entry: s.entry,
         mode: s.mode,
+        dataSource: s.dataSource,
+        setupPending: s.setupPending,
+        googleHealth: s.googleHealth,
         meId: s.meId,
         members: s.members,
         challenge: s.challenge,

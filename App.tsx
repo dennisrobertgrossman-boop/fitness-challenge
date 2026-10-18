@@ -1,10 +1,19 @@
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { useAppStore } from './src/store/useAppStore';
 import { colors } from './src/theme';
 
 export default function App() {
+  const hydrated = useAppStore((s) => s.hydrated);
+  const finishWebRedirect = useAppStore((s) => s.finishWebRedirect);
+  useEffect(() => {
+    // Web only: pick up the session after Google redirects back to the page.
+    if (hydrated) finishWebRedirect().catch(() => {});
+  }, [hydrated, finishWebRedirect]);
+
   return (
     <SafeAreaProvider style={styles.outer}>
       {/* On web, keep a phone-width column so the layout matches the mobile app. */}

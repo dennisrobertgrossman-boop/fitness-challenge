@@ -6,27 +6,33 @@ import { Screen, Section } from '../components/Screen';
 import { Txt } from '../components/Txt';
 import { Button } from '../components/ui';
 import { formatDay, lastNDays, relativeDay } from '../lib/dates';
+import { formatNumber } from '../lib/format';
 import { useAppStore, useMe } from '../store/useAppStore';
 import { colors, fontFamily, metricColors, radius, spacing } from '../theme';
 
+type Drafts = Record<string, { steps?: string; cardio?: string }>;
+
 /**
- * Lets you copy the daily Cardio Load from the Google Health app. Typed values
- * replace the heart-rate estimate everywhere, including challenge points.
+ * Enter daily numbers by hand: Cardio Load copied from the Google Health app
+ * (replaces the estimate everywhere, including challenge points), and steps for
+ * watches whose data can't be synced.
  */
 export function CardioLoadScreen() {
   const nav = useNavigation();
   const me = useMe();
   const daily = useAppStore((s) => s.daily[me.id] ?? {});
   const setCardioOverride = useAppStore((s) => s.setCardioOverride);
+  const setManualSteps = useAppStore((s) => s.setManualSteps);
   const days = lastNDays(14).reverse();
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<Drafts>({});
+
+  const edit = (day: string, field: 'steps' | 'cardio', text: string) =>
+    setDrafts({ ...drafts, [day]: { ...drafts[day], [field]: text.replace(/[^0-9]/g, '') } });
 
   const save = () => {
-    for (const [day, raw] of Object.entries(drafts)) {
-      const trimmed = raw.trim();
-      if (trimmed === '') continue;
-      const n = Number(trimmed);
-      if (!Number.isNaN(n) && n >= 0) setCardioOverride(me.id, day, n);
+    for (const [day, d] of Object.entries(drafts)) {
+      if (d.steps?.trim()) setManualSteps(me.id, day, Number(d.steps));
+      if (d.cardio?.trim()) setCardioOverride(me.id, day, Number(d.cardio));
     }
     nav.goBack();
   };
@@ -35,13 +41,22 @@ export function CardioLoadScreen() {
     <Screen underHeader>
       <Card style={{ marginBottom: spacing.xl }}>
         <Txt variant="subhead" color={colors.textSecondary}>
-          This app can't read Google's own Cardio Load number directly, so it estimates it from your heart rate. For exact
-          values, copy the daily Cardio Load from the Google Health app here. Typed values replace the estimate in all
-          charts and in challenge points.
+          Google's interface for other apps does not include Cardio Load, so this app estimates it from heart rate. For exact
+          values, copy the daily Cardio Load from the Google Health app here. Typed values replace the estimate in every
+          chart and in challenge points. Steps can be typed in too, for watches that can't sync.
         </Txt>
       </Card>
       <Section title="Last 14 Days">
         <Card padded={false}>
+          <View style={[styles.row, styles.border, { paddingVertical: 8 }]}>
+            <View style={{ flex: 1 }} />
+            <Txt variant="caption" color={colors.textMuted} style={styles.head}>
+              STEPS
+            </Txt>
+            <Txt variant="caption" color={colors.textMuted} style={styles.head}>
+              CARDIO
+            </Txt>
+          </View>
           {days.map((d, i) => {
             const row = daily[d];
             const manual = row?.cardioLoadSource === 'manual';
@@ -50,29 +65,41 @@ export function CardioLoadScreen() {
                 <View style={{ flex: 1 }}>
                   <Txt variant="body">{relativeDay(d)}</Txt>
                   <Txt variant="caption" color={colors.textMuted}>
-                    {formatDay(d, 'long')} · {manual ? 'from Google Health' : `estimate ${row?.cardioLoad ?? 0}`}
+                    {formatDay(d, 'long')}
                   </Txt>
+                  {manual ? (
+                    <Pressable onPress={() => setCardioOverride(me.id, d, null)} accessibilityRole="button" hitSlop={8}>
+                      <Txt variant="caption" color={metricColors.cardioLoad}>
+                        Cardio from Google Health · Reset
+                      </Txt>
+                    </Pressable>
+                  ) : null}
                 </View>
-                {manual ? (
-                  <Pressable onPress={() => setCardioOverride(me.id, d, null)} accessibilityRole="button" hitSlop={8}>
-                    <Txt variant="footnote" color={colors.textMuted}>
-                      Reset
-                    </Txt>
-                  </Pressable>
-                ) : null}
                 <TextInput
-                  value={drafts[d] ?? (manual ? String(row.cardioLoad) : '')}
-                  onChangeText={(t) => setDrafts({ ...drafts, [d]: t.replace(/[^0-9]/g, '') })}
-                  placeholder={String(row?.cardioLoad ?? 0)}
+                  value={drafts[d]?.steps ?? ''}
+                  onChangeText={(t) => edit(d, 'steps', t)}
+                  placeholder={formatNumber(row?.steps ?? 0)}
                   placeholderTextColor={colors.textMuted}
                   keyboardType="number-pad"
+                  accessibilityLabel={`Steps for ${formatDay(d, 'long')}`}
+                  style={[styles.input, { fontFamily, color: colors.text }]}
+                />
+                <TextInput
+                  value={drafts[d]?.cardio ?? ''}
+                  onChangeText={(t) => edit(d, 'cardio', t)}
+                  placeholder={String(row?.cardioLoad ?? 0)}
+                  placeholderTextColor={manual ? metricColors.cardioLoad : colors.textMuted}
+                  keyboardType="number-pad"
                   accessibilityLabel={`Cardio Load for ${formatDay(d, 'long')}`}
-                  style={[styles.input, { fontFamily, color: manual ? metricColors.cardioLoad : colors.text }]}
+                  style={[styles.input, styles.inputSmall, { fontFamily, color: metricColors.cardioLoad }]}
                 />
               </View>
             );
           })}
         </Card>
+        <Txt variant="footnote" color={colors.textMuted}>
+          Grey numbers are the current values. Leave a field empty to keep it.
+        </Txt>
       </Section>
       <Button label="Save" onPress={save} />
     </Screen>
@@ -80,15 +107,17 @@ export function CardioLoadScreen() {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingHorizontal: spacing.lg, paddingVertical: 10 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingHorizontal: spacing.lg, paddingVertical: 10 },
   border: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
+  head: { width: 84, textAlign: 'right' },
   input: {
-    width: 76,
+    width: 84,
     textAlign: 'right',
-    fontSize: 17,
+    fontSize: 16,
     backgroundColor: colors.cardRaised,
     borderRadius: radius.sm,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
+  inputSmall: {},
 });

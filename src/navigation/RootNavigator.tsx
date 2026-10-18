@@ -10,9 +10,12 @@ import { ChallengeScreen } from '../screens/ChallengeScreen';
 import { DataScreen } from '../screens/DataScreen';
 import { MemberScreen } from '../screens/MemberScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
+import { SetupScreen } from '../screens/SetupScreen';
 import { SummaryScreen } from '../screens/SummaryScreen';
 import { WorkoutDetailScreen } from '../screens/WorkoutDetailScreen';
+import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { WorkoutsScreen } from '../screens/WorkoutsScreen';
+import { useAppStore } from '../store/useAppStore';
 import { colors, fontFamily, metricColors } from '../theme';
 import type { RootStackParamList, TabParamList } from './types';
 
@@ -90,33 +93,49 @@ function Tabs() {
   );
 }
 
+const stackOptions = {
+  headerStyle: { backgroundColor: colors.bg },
+  headerTintColor: colors.accent,
+  headerTitleStyle: { color: colors.text, fontFamily },
+  headerShadowVisible: false,
+  contentStyle: { backgroundColor: colors.bg },
+};
+
+function MainStack({ initialRouteName }: { initialRouteName: 'Tabs' | 'Setup' }) {
+  return (
+    <Stack.Navigator initialRouteName={initialRouteName} screenOptions={stackOptions}>
+      <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false, title: 'Summary' }} />
+      <Stack.Screen name="Member" component={MemberScreen} options={{ title: '' }} />
+      <Stack.Screen name="Workout" component={WorkoutDetailScreen} options={{ title: 'Workout' }} />
+      <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
+      <Stack.Screen name="Setup" component={SetupScreen} options={{ title: 'Get Started' }} />
+      <Stack.Screen name="AddWorkout" component={AddWorkoutScreen} options={{ title: 'Log Workout', presentation: 'modal' }} />
+      <Stack.Screen name="CardioLoad" component={CardioLoadScreen} options={{ title: 'Daily Numbers', presentation: 'modal' }} />
+    </Stack.Navigator>
+  );
+}
+
+function WelcomeStack() {
+  return (
+    <Stack.Navigator screenOptions={{ ...stackOptions, headerShown: false }}>
+      <Stack.Screen name="Welcome" component={WelcomeScreen} />
+    </Stack.Navigator>
+  );
+}
+
 export function RootNavigator() {
+  const hydrated = useAppStore((s) => s.hydrated);
+  const entry = useAppStore((s) => s.entry);
+  const setupPending = useAppStore((s) => s.setupPending);
+  // Wait for saved state so a signed-in user never sees the welcome screen flash.
+  if (!hydrated) return <View style={{ flex: 1, backgroundColor: colors.bg }} />;
   return (
     <NavigationContainer theme={theme}>
-      <Stack.Navigator
-        screenOptions={{
-          headerStyle: { backgroundColor: colors.bg },
-          headerTintColor: colors.accent,
-          headerTitleStyle: { color: colors.text, fontFamily },
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: colors.bg },
-        }}
-      >
-        <Stack.Screen name="Tabs" component={Tabs} options={{ headerShown: false, title: 'Summary' }} />
-        <Stack.Screen name="Member" component={MemberScreen} options={{ title: '' }} />
-        <Stack.Screen name="Workout" component={WorkoutDetailScreen} options={{ title: 'Workout' }} />
-        <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Settings' }} />
-        <Stack.Screen
-          name="AddWorkout"
-          component={AddWorkoutScreen}
-          options={{ title: 'Log Workout', presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="CardioLoad"
-          component={CardioLoadScreen}
-          options={{ title: 'Cardio Load', presentation: 'modal' }}
-        />
-      </Stack.Navigator>
+      {entry === 'welcome' ? (
+        <WelcomeStack />
+      ) : (
+        <MainStack key="main" initialRouteName={setupPending ? 'Setup' : 'Tabs'} />
+      )}
     </NavigationContainer>
   );
 }

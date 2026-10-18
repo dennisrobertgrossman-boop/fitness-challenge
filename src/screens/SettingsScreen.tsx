@@ -2,16 +2,15 @@ import { useNavigation } from '@react-navigation/native';
 import { useState } from 'react';
 import { Alert, Platform, Share, View } from 'react-native';
 import { Card } from '../components/Card';
+import { GoogleButton } from '../components/GoogleButton';
 import { Screen, Section } from '../components/Screen';
 import { Txt } from '../components/Txt';
 import { Button, Field, ListGroup, ListRow, Stepper } from '../components/ui';
 import { addDays, daysBetween, formatDay } from '../lib/dates';
 import { formatNumber } from '../lib/format';
-import * as cloud from '../services/cloud/api';
-import { cloudConfigured } from '../services/cloud/client';
 import { healthProvider } from '../services/health';
 import { useAppStore, useMe } from '../store/useAppStore';
-import { colors, memberPalette, spacing } from '../theme';
+import { colors, spacing } from '../theme';
 
 function notify(title: string, body?: string) {
   if (Platform.OS === 'web') globalThis.alert?.(body ? `${title}\n\n${body}` : title);
@@ -29,7 +28,17 @@ export function SettingsScreen() {
   const s = useAppStore();
   const me = useMe();
 
+  const [signingIn, setSigningIn] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const weeks = Math.round((daysBetween(s.challenge.start, s.challenge.end) + 1) / 7);
+  const sourceLabel =
+    s.dataSource === 'google'
+      ? s.googleHealth?.linked
+        ? 'Google Health (Fitbit)'
+        : 'Google Health, not connected'
+      : healthProvider.id === 'none'
+        ? 'Not available here'
+        : healthProvider.label;
 
   return (
     <Screen underHeader>
@@ -57,48 +66,106 @@ export function SettingsScreen() {
         </ListGroup>
       </Section>
 
+      {/* ---------- Account ---------- */}
+      <Section title="Account">
+        {s.cloud ? (
+          <ListGroup>
+            <ListRow label="Signed in as" value={s.cloud.email} />
+            <ListRow label="Group" value={s.cloud.groupName ?? 'Not joined yet'} />
+            {s.cloud.inviteCode ? (
+              <ListRow
+                label="Invite code"
+                value={s.cloud.inviteCode}
+                onPress={() => Share.share({ message: `Join our Brothers Challenge! Invite code: ${s.cloud?.inviteCode}` })}
+              />
+            ) : null}
+            <ListRow label="Group and data source" last onPress={() => nav.navigate('Setup')} />
+          </ListGroup>
+        ) : (
+          <Card>
+            <Txt variant="subhead" color={colors.textSecondary} style={{ marginBottom: spacing.md }}>
+              Sign in to share your numbers with your brothers and see theirs.
+            </Txt>
+            <GoogleButton
+              loading={signingIn}
+              onPress={async () => {
+                setNotice(null);
+                setSigningIn(true);
+                try {
+                  if ((await s.signInWithGoogle()) === 'needs-group') nav.navigate('Setup');
+                } catch (e) {
+                  setNotice(e instanceof Error ? e.message : String(e));
+                } finally {
+                  setSigningIn(false);
+                }
+              }}
+            />
+            {notice ? (
+              <Txt variant="footnote" color={colors.textSecondary} style={{ marginTop: spacing.md }}>
+                {notice}
+              </Txt>
+            ) : null}
+          </Card>
+        )}
+      </Section>
+
       {/* ---------- Data source ---------- */}
       <Section title="Health Data">
         {s.mode === 'demo' ? (
           <Card>
             <Txt variant="subhead" color={colors.textSecondary} style={{ marginBottom: spacing.md }}>
-              You're using demo data for three brothers. Switch to your own data to read steps, workouts and heart rate
-              from {Platform.OS === 'ios' ? 'Apple Health' : Platform.OS === 'android' ? 'Health Connect' : 'Health Connect (Android) or Apple Health (iPhone)'}.
+              You're looking at demo data for three made-up brothers. Sign in above to use your own, or try your own data on
+              this phone without an account.
             </Txt>
-            <Button label="Use My Real Data" onPress={() => s.goLive(me.name)} />
+            <Button kind="secondary" label="Use My Data on This Phone Only" onPress={() => s.goLive(me.name)} />
           </Card>
         ) : (
           <>
-            <ListGroup footer={healthProvider.id === 'none' ? 'Health data can only be read in the iOS and Android app (development build).' : undefined}>
-              <ListRow label="Source" value={healthProvider.id === 'none' ? 'Not available here' : healthProvider.label} />
-              <ListRow label="Last sync" value={since(s.lastHealthSync)} />
-              <ListRow label="Days to import" last right={<Stepper value={s.syncDays} step={30} min={30} onChange={(v) => useAppStore.setState({ syncDays: Math.min(365, v) })} />} />
+            <ListGroup
+              footer={
+                s.dataSource === 'device' && healthProvider.id === 'none'
+                  ? 'Health data can only be read in the iOS and Android app (development build).'
+                  : s.dataSource === 'google'
+                    ? 'Google Health keeps syncing in the background about once an hour.'
+                    : undefined
+              }
+            >
+              <ListRow label="Source" value={sourceLabel} />
+              <ListRow label="Last sync" value={since(s.dataSource === 'google' ? s.googleHealth?.lastSync : s.lastHealthSync)} />
+              {s.dataSource === 'google' && s.googleHealth?.lastError ? (
+                <ListRow label="Problem" value={s.googleHealth.lastError} />
+              ) : null}
+              {s.dataSource === 'device' ? (
+                <ListRow
+                  label="Days to import"
+                  right={<Stepper value={s.syncDays} step={30} min={30} onChange={(v) => useAppStore.setState({ syncDays: Math.min(365, v) })} />}
+                />
+              ) : null}
+              {s.cloud ? <ListRow label="Change data source" last onPress={() => nav.navigate('Setup')} /> : null}
             </ListGroup>
             <Button
-              label={`Sync ${healthProvider.id === 'none' ? 'Health Data' : healthProvider.label}`}
+              label="Sync Now"
               loading={s.busy}
               onPress={() =>
                 s
-                  .syncHealthNow()
+                  .syncNow()
                   .then((msg) => notify('Sync complete', msg))
                   .catch((e) => notify('Sync failed', e instanceof Error ? e.message : String(e)))
               }
             />
-            {healthProvider.openSettings ? (
+            {s.dataSource === 'device' && healthProvider.openSettings ? (
               <Button kind="secondary" label="Manage Permissions" onPress={() => healthProvider.openSettings?.()} />
+            ) : null}
+            {s.dataSource === 'google' && s.googleHealth?.linked ? (
+              <Button kind="secondary" label="Disconnect Google Health" onPress={() => s.disconnectGoogleHealth()} />
             ) : null}
           </>
         )}
         <ListGroup footer="Heart-rate zones and the Cardio Load estimate use your age and resting heart rate.">
-          <ListRow label="Cardio Load from Google Health" onPress={() => nav.navigate('CardioLoad')} />
+          <ListRow label="Enter daily numbers by hand" onPress={() => nav.navigate('CardioLoad')} />
           <ListRow label="Age" right={<Stepper value={s.profile.age} min={12} onChange={(v) => s.setProfile({ age: v })} />} />
           <ListRow label="Resting heart rate" last right={<Stepper value={s.profile.restingHr} min={35} onChange={(v) => s.setProfile({ restingHr: v })} />} />
         </ListGroup>
-      </Section>
-
-      {/* ---------- Group ---------- */}
-      <Section title="Group">
-        <GroupSettings />
       </Section>
 
       {/* ---------- Challenge ---------- */}
@@ -158,21 +225,27 @@ export function SettingsScreen() {
         </Section>
       ) : null}
 
-      {s.mode === 'live' ? (
+      {s.cloud || s.mode === 'live' ? (
         <Section>
           <ListGroup>
             <ListRow
-              label="Switch Back to Demo Data"
+              label={s.cloud ? 'Sign Out' : 'Switch Back to Demo Data'}
               destructive
               last
               onPress={() => {
-                const run = () => s.enterDemo();
+                const run = () => (s.cloud ? s.signOut() : s.enterDemo());
                 if (Platform.OS === 'web') run();
                 else
-                  Alert.alert('Switch to demo data?', 'Your imported data on this phone will be replaced by demo data.', [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Switch', style: 'destructive', onPress: run },
-                  ]);
+                  Alert.alert(
+                    s.cloud ? 'Sign out?' : 'Switch to demo data?',
+                    s.cloud
+                      ? 'Your data stays in the group. Sign in again with the same Google account to get it back.'
+                      : 'Your imported data on this phone will be replaced by demo data.',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: s.cloud ? 'Sign Out' : 'Switch', style: 'destructive', onPress: run },
+                    ],
+                  );
               }}
             />
           </ListGroup>
@@ -194,118 +267,4 @@ function CommitField({ label, initial, onCommit }: { label: string; initial: str
     if (v && v !== initial) onCommit(v);
   };
   return <Field label={label} value={value} onChangeText={setValue} onBlur={commit} onSubmitEditing={commit} returnKeyType="done" />;
-}
-
-function GroupSettings() {
-  const s = useAppStore();
-  const me = useMe();
-  const [email, setEmail] = useState(s.cloud?.email ?? '');
-  const [code, setCode] = useState('');
-  const [codeSent, setCodeSent] = useState(false);
-  const [groupName, setGroupName] = useState('Brothers');
-  const [invite, setInvite] = useState('');
-  const [working, setWorking] = useState(false);
-
-  const run = async (fn: () => Promise<void>) => {
-    setWorking(true);
-    try {
-      await fn();
-    } catch (e) {
-      notify('Something went wrong', e instanceof Error ? e.message : String(e));
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  if (!cloudConfigured) {
-    return (
-      <Card>
-        <Txt variant="subhead" color={colors.textSecondary}>
-          Sharing with your brothers needs a cloud backend (Supabase). Add EXPO_PUBLIC_SUPABASE_URL and
-          EXPO_PUBLIC_SUPABASE_ANON_KEY to the build. The README explains the five-minute setup.
-        </Txt>
-      </Card>
-    );
-  }
-
-  if (s.mode !== 'live') {
-    return (
-      <Card>
-        <Txt variant="subhead" color={colors.textSecondary}>
-          Switch to your real data first, then create a group and send the invite code to your brothers.
-        </Txt>
-      </Card>
-    );
-  }
-
-  if (!s.cloud) {
-    return (
-      <View style={{ gap: spacing.md }}>
-        <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" placeholder="you@example.com" />
-        {codeSent ? (
-          <>
-            <Field label="Code from the email" value={code} onChangeText={setCode} keyboardType="number-pad" placeholder="123456" />
-            <Button
-              label="Sign In"
-              loading={working}
-              onPress={() =>
-                run(async () => {
-                  const user = await cloud.verifyLoginCode(email.trim(), code.trim());
-                  s.linkCloud({ userId: user.userId, email: user.email });
-                  const group = await cloud.myGroup();
-                  if (group) {
-                    useAppStore.setState((st) => ({ cloud: { ...st.cloud!, groupId: group.id, groupName: group.name, inviteCode: group.invite_code } }));
-                    await useAppStore.getState().syncCloudNow();
-                  }
-                })
-              }
-            />
-          </>
-        ) : (
-          <Button label="Email Me a Sign-in Code" loading={working} onPress={() => run(async () => { await cloud.sendLoginCode(email.trim()); setCodeSent(true); })} />
-        )}
-      </View>
-    );
-  }
-
-  if (!s.cloud.groupId) {
-    const color = memberPalette[0];
-    const finish = async (group: cloud.Group) => {
-      useAppStore.setState((st) => ({ cloud: { ...st.cloud!, groupId: group.id, groupName: group.name, inviteCode: group.invite_code } }));
-      await useAppStore.getState().syncCloudNow();
-    };
-    return (
-      <View style={{ gap: spacing.md }}>
-        <Card title="Start a group">
-          <View style={{ gap: spacing.md }}>
-            <Field label="Group name" value={groupName} onChangeText={setGroupName} />
-            <Button label="Create Group" loading={working} onPress={() => run(async () => finish(await cloud.createGroup(groupName, me.name, color)))} />
-          </View>
-        </Card>
-        <Card title="Or join your brother's group">
-          <View style={{ gap: spacing.md }}>
-            <Field label="Invite code" value={invite} onChangeText={setInvite} autoCapitalize="characters" placeholder="ABC123" />
-            <Button kind="secondary" label="Join Group" loading={working} onPress={() => run(async () => finish(await cloud.joinGroup(invite, me.name, color)))} />
-          </View>
-        </Card>
-      </View>
-    );
-  }
-
-  return (
-    <View style={{ gap: spacing.md }}>
-      <ListGroup footer="Share the invite code with your brothers. They enter it under Settings → Group → Join.">
-        <ListRow label="Group" value={s.cloud.groupName} />
-        <ListRow label="Invite code" value={s.cloud.inviteCode} onPress={() => Share.share({ message: `Join our fitness challenge! Invite code: ${s.cloud?.inviteCode}` })} />
-        <ListRow label="Signed in as" value={s.cloud.email} />
-        <ListRow label="Last sync" value={since(s.lastCloudSync)} last />
-      </ListGroup>
-      <Button
-        label="Sync Group Now"
-        loading={s.busy}
-        onPress={() => s.syncCloudNow().then((m) => notify('Synced', m)).catch((e) => notify('Sync failed', e instanceof Error ? e.message : String(e)))}
-      />
-      <Button kind="destructive" label="Sign Out" onPress={() => s.unlinkCloud()} />
-    </View>
-  );
 }

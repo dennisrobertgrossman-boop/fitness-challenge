@@ -183,3 +183,38 @@ export async function pullGroupData(sinceDay: string) {
       : undefined,
   };
 }
+
+// ---------- Google Health (Fitbit) via the google-health Edge Function ----------
+
+export interface GoogleHealthStatus {
+  linked: boolean;
+  lastSync: string | null;
+  lastError: string | null;
+}
+
+async function googleHealth<T>(body: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase().functions.invoke('google-health', { body });
+  if (error) {
+    // The function answers errors as { error: "…" }; surface that message.
+    const context = (error as { context?: Response }).context;
+    const detail = context ? await context.json().catch(() => null) : null;
+    throw new Error(detail?.error ?? error.message);
+  }
+  return data as T;
+}
+
+export function linkGoogleHealth(refreshToken: string, today: string) {
+  return googleHealth<{ days: number; workouts: number }>({ action: 'link', refreshToken, today });
+}
+
+export function syncGoogleHealth(today: string, days = 14) {
+  return googleHealth<{ days: number; workouts: number }>({ action: 'sync', today, days });
+}
+
+export function googleHealthStatus() {
+  return googleHealth<GoogleHealthStatus>({ action: 'status' });
+}
+
+export function unlinkGoogleHealth() {
+  return googleHealth<{ linked: boolean }>({ action: 'unlink' });
+}

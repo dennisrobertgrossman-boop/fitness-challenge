@@ -1,5 +1,6 @@
 import 'react-native-url-polyfill/auto';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Platform } from 'react-native';
 import { safeStorage } from '../storage';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -18,7 +19,10 @@ export function supabase(): SupabaseClient {
         storage: safeStorage,
         autoRefreshToken: true,
         persistSession: true,
-        detectSessionInUrl: false,
+        // PKCE: the browser sign-in returns a one-time code the app exchanges for a session.
+        flowType: 'pkce',
+        // On the web the code arrives in the page URL after Google redirects back.
+        detectSessionInUrl: Platform.OS === 'web',
       },
     });
   }

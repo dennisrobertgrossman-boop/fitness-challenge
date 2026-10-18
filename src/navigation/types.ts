@@ -8,6 +8,8 @@ export type RootStackParamList = {
   AddWorkout: undefined;
   CardioLoad: undefined;
   Settings: undefined;
+  Setup: undefined;
+  Welcome: undefined;
 };
 
 export type TabParamList = {

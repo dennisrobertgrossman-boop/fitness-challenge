@@ -57,7 +57,8 @@
             "minSdkVersion": 26
           }
         }
-      ]
+      ],
+      "expo-web-browser"
     ]
   }
 }
