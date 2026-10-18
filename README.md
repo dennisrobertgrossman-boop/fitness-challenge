@@ -98,5 +98,6 @@ npm run build:web
 ## Font
 
 The interface uses Segoe UI wherever the device has it (Windows browsers). Segoe UI is a Microsoft font that
-is not licensed for bundling inside mobile apps, so iOS and Android use the system font. To use another font,
-add it with `expo-font` and change `fontFamily` in `src/theme/index.ts`.
+ships with Windows. It is not bundled into the phone app because no licence permitting that has been
+confirmed, so iOS and Android use the system font. If you hold a licence that allows embedding it, add the
+font file with `expo-font` and set `fontFamily` in `src/theme/index.ts`.

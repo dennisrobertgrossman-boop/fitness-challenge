@@ -40,8 +40,8 @@ export const memberPalette = ['#3987E5', '#D95926', '#199E70'] as const;
 
 /**
  * Segoe UI is used wherever the platform provides it (Windows / web).
- * It is not licensed for bundling inside mobile apps, so iOS and Android fall
- * back to the system font unless a licensed font file is added via expo-font.
+ * The font file is not bundled (no licence for embedding it has been confirmed),
+ * so iOS and Android fall back to the system font unless one is added via expo-font.
  */
 export const fontFamily = Platform.select<string | undefined>({
   web: "'Segoe UI', 'Segoe UI Variable Text', system-ui, -apple-system, Roboto, 'Helvetica Neue', sans-serif",
